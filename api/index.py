@@ -25,6 +25,11 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'note-app-secret')
 CORS(app)
 
 
+@app.route('/api/ping')
+def ping():
+    return jsonify({'ping': 'pong', 'request_path': request.path})
+
+
 # ── Supabase helpers ──────────────────────────────────────────────────────
 
 def _supa_headers():
