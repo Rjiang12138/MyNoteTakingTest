@@ -131,9 +131,22 @@ def _create_note():
         return jsonify({"error": "Title and content are required"}), 400
     now = datetime.now(timezone.utc).isoformat()
     body = {"title": d["title"], "content": d["content"], "created_at": now, "updated_at": now}
-    r = requests.post(f"{SUPABASE_URL}/rest/v1/notes?select=*", json=body, headers=_su(), timeout=10)
-    r.raise_for_status()
-    return jsonify(r.json()[0]), 201
+    try:
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/notes?select=*",
+            json=body,
+            headers={**_su(), "Prefer": "return=representation"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not isinstance(rows, list) or not rows:
+            return jsonify({"error": "Supabase returned no created note", "details": rows}), 502
+        return jsonify(rows[0]), 201
+    except requests.exceptions.RequestException as error:
+        status = error.response.status_code if error.response is not None else 502
+        app.logger.error("Supabase insert failed: status=%s response=%s", status, getattr(error.response, "text", str(error)))
+        return jsonify({"error": "Supabase insert failed", "status": status}), 502
 
 def _get_note(nid):
     if not SUPABASE_URL or not SUPABASE_KEY:
