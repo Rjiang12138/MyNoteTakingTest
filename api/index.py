@@ -1,5 +1,5 @@
-﻿"""Vercel serverless entry point — ALL routes in one file."""
-import os
+﻿"""Vercel serverless entry point — manual dispatch, no Flask route matching."""
+import os, re, json
 from datetime import datetime, timezone
 import requests
 from flask import Flask, jsonify, request, send_from_directory
@@ -16,7 +16,6 @@ LANGUAGES = {
 }
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "src", "static")
-
 app = Flask(__name__)
 CORS(app)
 
@@ -24,26 +23,82 @@ def _su():
     return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
 
 
-# Helper: register route under BOTH /api/xxx and /xxx (Vercel strips /api/ prefix)
-def route(path, **kw):
-    def wrap(f):
-        app.route("/api" + path, **kw)(f)
-        app.route(path, **kw)(f)
-        return f
-    return wrap
+# ============ SINGLE CATCH-ALL ROUTE WITH MANUAL DISPATCH ============
+
+@app.route("/", defaults={"rest": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+@app.route("/<path:rest>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
+def handler(rest):
+    # Normalize: Vercel strips /api/ prefix, Flask sees /xxx instead of /api/xxx
+    path = "/" + rest if rest else "/"
+    
+    if request.method == "OPTIONS":
+        return "", 200
+
+    # --- static files ---
+    if request.method == "GET":
+        if rest and os.path.isfile(os.path.join(STATIC, rest)):
+            return send_from_directory(STATIC, rest)
+    
+    # --- API: notes ---
+    m = re.match(r"^notes/(\d+)$", path)
+    if path == "notes" or path == "/notes":
+        if request.method == "GET":
+            return _list_notes()
+        if request.method == "POST":
+            return _create_note()
+    elif m:
+        nid = int(m.group(1))
+        if request.method == "GET":
+            return _get_note(nid)
+        if request.method == "PUT":
+            return _update_note(nid)
+        if request.method == "DELETE":
+            return _delete_note(nid)
+    elif path in ("notes/search", "/notes/search"):
+        if request.method == "GET":
+            return _search_notes()
+    
+    # --- API: translate ---
+    if path in ("translate", "/translate"):
+        if request.method == "POST":
+            return _translate()
+    elif path in ("translate/languages", "/translate/languages"):
+        if request.method == "GET":
+            return _langs()
+    
+    # --- API: users ---
+    if path in ("users", "/users"):
+        if request.method == "GET":
+            return jsonify([])
+    
+    # --- API: ping ---
+    if path in ("ping", "/ping"):
+        return jsonify({"pong": True, "path": request.path, "seen_path": path, "method": request.method})
+    
+    # --- debug ---
+    if path in ("debug", "/debug"):
+        return jsonify({
+            "path_seen": path,
+            "request_path": request.path,
+            "method": request.method,
+            "environ": {k: v for k, v in request.environ.items() if "path" in k.lower() or "route" in k.lower() or "url" in k.lower()}
+        })
+    
+    # --- 404 or SPA ---
+    if request.method == "GET":
+        return send_from_directory(STATIC, "index.html")
+    return jsonify({"error": "Not found"}), 404
 
 
-# ==================== API: notes ====================
+# ============ handler functions ============
 
-@route("/notes", methods=["GET"])
-def api_notes_list():
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(), params={"order": "updated_at.desc"}, timeout=10)
+def _list_notes():
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
+                     params={"order": "updated_at.desc"}, timeout=10)
     r.raise_for_status()
     return jsonify(r.json())
 
-
-@route("/notes", methods=["POST"])
-def api_notes_create():
+def _create_note():
     d = request.get_json(silent=True) or {}
     if not d.get("title") or not d.get("content"):
         return jsonify({"error": "Title and content are required"}), 400
@@ -53,61 +108,55 @@ def api_notes_create():
     r.raise_for_status()
     return jsonify(r.json()[0]), 201
 
-
-@route("/notes/search", methods=["GET"])
-def api_notes_search():
-    q = (request.args.get("q") or "").strip()
-    if not q: return jsonify([])
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(), params={"order": "updated_at.desc"}, timeout=10)
-    r.raise_for_status()
-    ql = q.lower()
-    return jsonify([n for n in r.json() if ql in (n.get("title") or "").lower() or ql in (n.get("content") or "").lower()])
-
-
-@route("/notes/<int:nid>", methods=["GET"])
-def api_note_get(nid):
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(), params={"id": f"eq.{nid}"}, timeout=10)
+def _get_note(nid):
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
+                     params={"id": f"eq.{nid}"}, timeout=10)
     r.raise_for_status()
     rows = r.json()
     return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
-
-@route("/notes/<int:nid>", methods=["PUT"])
-def api_note_update(nid):
+def _update_note(nid):
     d = request.get_json(silent=True) or {}
     body = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "title" in d: body["title"] = d["title"]
     if "content" in d: body["content"] = d["content"]
-    r = requests.patch(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}&select=*", json=body, headers=_su(), timeout=10)
+    r = requests.patch(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}&select=*",
+                       json=body, headers=_su(), timeout=10)
     r.raise_for_status()
     rows = r.json()
     return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
-
-@route("/notes/<int:nid>", methods=["DELETE"])
-def api_note_delete(nid):
+def _delete_note(nid):
     r = requests.delete(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}", headers=_su(), timeout=10)
     r.raise_for_status()
     return "", 204
 
+def _search_notes():
+    q = (request.args.get("q") or "").strip()
+    if not q: return jsonify([])
+    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
+                     params={"order": "updated_at.desc"}, timeout=10)
+    r.raise_for_status()
+    ql = q.lower()
+    return jsonify([n for n in r.json()
+                    if ql in (n.get("title") or "").lower()
+                    or ql in (n.get("content") or "").lower()])
 
-# ==================== API: translate ====================
-
-@route("/translate", methods=["POST"])
-def api_translate():
+def _translate():
     if not OPENROUTER_API_KEY:
         return jsonify({"error": "OPENROUTER_API_KEY not set"}), 500
     d = request.get_json(silent=True) or {}
     text = (d.get("text") or "").strip()
     target = (d.get("target_lang") or "en").strip()
     if not text: return jsonify({"error": "Text required"}), 400
-    if target not in LANGUAGES: return jsonify({"error": f"Unsupported language: {target}"}), 400
+    if target not in LANGUAGES:
+        return jsonify({"error": f"Unsupported: {target}"}), 400
     ln = LANGUAGES[target]
     try:
         r = requests.post("https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
             json={"model": "deepseek/deepseek-chat",
-                  "messages": [{"role": "system", "content": f"Translate to {ln}. Return only the translation."},
+                  "messages": [{"role": "system", "content": f"Translate to {ln}. Only the translation."},
                                {"role": "user", "content": text}],
                   "temperature": 0.3, "max_tokens": 4096},
             timeout=10)
@@ -115,42 +164,11 @@ def api_translate():
         result = r.json()["choices"][0]["message"]["content"].strip()
         return jsonify({"translated_text": result, "target_lang": target, "target_lang_name": ln})
     except requests.exceptions.Timeout:
-        return jsonify({"error": "Translation service timed out"}), 504
+        return jsonify({"error": "Timeout"}), 504
     except requests.exceptions.RequestException as e:
         return jsonify({"error": str(e)}), 502
     except (KeyError, IndexError):
-        return jsonify({"error": "Unexpected response from translation service"}), 502
+        return jsonify({"error": "Bad response"}), 502
 
-
-@route("/translate/languages", methods=["GET"])
-def api_translate_langs():
+def _langs():
     return jsonify([{"code": c, "name": n} for c, n in LANGUAGES.items()])
-
-
-# ==================== API: users ====================
-
-@route("/users", methods=["GET"])
-def api_users():
-    return jsonify([])
-
-
-# ==================== API: ping ====================
-
-@route("/ping")
-def api_ping():
-    return jsonify({"pong": True, "path": request.path, "method": request.method})
-
-
-# ==================== static & SPA ====================
-
-@app.route("/")
-def index():
-    return send_from_directory(STATIC, "index.html")
-
-
-@app.route("/<path:filename>")
-def static_files(filename):
-    filepath = os.path.join(STATIC, filename)
-    if os.path.isfile(filepath):
-        return send_from_directory(STATIC, filename)
-    return send_from_directory(STATIC, "index.html")
