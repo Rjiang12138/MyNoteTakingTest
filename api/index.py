@@ -18,22 +18,31 @@ LANGUAGES = {
 STATIC = os.path.join(os.path.dirname(__file__), "..", "src", "static")
 
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app)
 
 def _su():
     return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
 
 
+# Helper: register route under BOTH /api/xxx and /xxx (Vercel strips /api/ prefix)
+def route(path, **kw):
+    def wrap(f):
+        app.route("/api" + path, **kw)(f)
+        app.route(path, **kw)(f)
+        return f
+    return wrap
+
+
 # ==================== API: notes ====================
 
-@app.route("/api/notes", methods=["GET"])
+@route("/notes", methods=["GET"])
 def api_notes_list():
     r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(), params={"order": "updated_at.desc"}, timeout=10)
     r.raise_for_status()
     return jsonify(r.json())
 
 
-@app.route("/api/notes", methods=["POST"])
+@route("/notes", methods=["POST"])
 def api_notes_create():
     d = request.get_json(silent=True) or {}
     if not d.get("title") or not d.get("content"):
@@ -45,7 +54,7 @@ def api_notes_create():
     return jsonify(r.json()[0]), 201
 
 
-@app.route("/api/notes/search", methods=["GET"])
+@route("/notes/search", methods=["GET"])
 def api_notes_search():
     q = (request.args.get("q") or "").strip()
     if not q: return jsonify([])
@@ -55,15 +64,15 @@ def api_notes_search():
     return jsonify([n for n in r.json() if ql in (n.get("title") or "").lower() or ql in (n.get("content") or "").lower()])
 
 
-@app.route("/api/notes/<int:nid>", methods=["GET"])
+@route("/notes/<int:nid>", methods=["GET"])
 def api_note_get(nid):
     r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(), params={"id": f"eq.{nid}"}, timeout=10)
     r.raise_for_status()
     rows = r.json()
-    return jsonify(rows[0]) if rows else (jsonify({"error": "Not found"}), 404)
+    return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
 
-@app.route("/api/notes/<int:nid>", methods=["PUT"])
+@route("/notes/<int:nid>", methods=["PUT"])
 def api_note_update(nid):
     d = request.get_json(silent=True) or {}
     body = {"updated_at": datetime.now(timezone.utc).isoformat()}
@@ -72,10 +81,10 @@ def api_note_update(nid):
     r = requests.patch(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}&select=*", json=body, headers=_su(), timeout=10)
     r.raise_for_status()
     rows = r.json()
-    return jsonify(rows[0]) if rows else (jsonify({"error": "Not found"}), 404)
+    return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
 
-@app.route("/api/notes/<int:nid>", methods=["DELETE"])
+@route("/notes/<int:nid>", methods=["DELETE"])
 def api_note_delete(nid):
     r = requests.delete(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}", headers=_su(), timeout=10)
     r.raise_for_status()
@@ -84,7 +93,7 @@ def api_note_delete(nid):
 
 # ==================== API: translate ====================
 
-@app.route("/api/translate", methods=["POST"])
+@route("/translate", methods=["POST"])
 def api_translate():
     if not OPENROUTER_API_KEY:
         return jsonify({"error": "OPENROUTER_API_KEY not set"}), 500
@@ -98,7 +107,7 @@ def api_translate():
         r = requests.post("https://openrouter.ai/api/v1/chat/completions",
             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
             json={"model": "deepseek/deepseek-chat",
-                  "messages": [{"role": "system", "content": f"Translate to {ln}. Return only the translation, no notes."},
+                  "messages": [{"role": "system", "content": f"Translate to {ln}. Return only the translation."},
                                {"role": "user", "content": text}],
                   "temperature": 0.3, "max_tokens": 4096},
             timeout=10)
@@ -113,21 +122,21 @@ def api_translate():
         return jsonify({"error": "Unexpected response from translation service"}), 502
 
 
-@app.route("/api/translate/languages", methods=["GET"])
+@route("/translate/languages", methods=["GET"])
 def api_translate_langs():
     return jsonify([{"code": c, "name": n} for c, n in LANGUAGES.items()])
 
 
-# ==================== API: users (stub) ====================
+# ==================== API: users ====================
 
-@app.route("/api/users", methods=["GET"])
+@route("/users", methods=["GET"])
 def api_users():
     return jsonify([])
 
 
 # ==================== API: ping ====================
 
-@app.route("/api/ping")
+@route("/ping")
 def api_ping():
     return jsonify({"pong": True, "path": request.path, "method": request.method})
 
@@ -141,7 +150,6 @@ def index():
 
 @app.route("/<path:filename>")
 def static_files(filename):
-    # API routes are already handled above, so this is for static files only
     filepath = os.path.join(STATIC, filename)
     if os.path.isfile(filepath):
         return send_from_directory(STATIC, filename)
