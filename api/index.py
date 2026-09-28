@@ -37,15 +37,26 @@ def _supa_headers():
 
 # ── main handler — routes everything through one entry point ─────────────
 
-@app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
-@app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
+@app.route('/', defaults={'path': ''}, methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+@app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def handle(path):
-    """Single entry point that dispatches to API handlers or serves static files."""
-    # For OPTIONS (CORS preflight), return empty 200
+    """Single entry point dispatcher."""
     if request.method == 'OPTIONS':
         return '', 200
 
-    # API dispatch
+    # DEBUG: dump what Flask sees
+    if path in ('api/debug', 'debug'):
+        import json as _json
+        return jsonify({
+            'path_arg': path,
+            'request.path': request.path,
+            'request.url': request.url,
+            'request.method': request.method,
+            'request.headers': dict(request.headers),
+            'environ_PATHS': {k: v for k, v in request.environ.items()
+                              if 'path' in k.lower() or 'url' in k.lower() or 'route' in k.lower() or 'rewrite' in k.lower() or 'forward' in k.lower()},
+        })
+
     if path.startswith('api/'):
         return _dispatch_api(path)
 
