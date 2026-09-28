@@ -164,11 +164,25 @@ def _update_note(nid):
     body = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "title" in d: body["title"] = d["title"]
     if "content" in d: body["content"] = d["content"]
-    r = requests.patch(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}&select=*",
-                       json=body, headers=_su(), timeout=10)
-    r.raise_for_status()
-    rows = r.json()
-    return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
+    try:
+        r = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}&select=*",
+            json=body,
+            headers={**_su(), "Prefer": "return=representation"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        if r.status_code == 204:
+            return jsonify({"error": "Supabase updated the note without returning it"}), 502
+        rows = r.json()
+        return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
+    except requests.exceptions.RequestException as error:
+        status = error.response.status_code if error.response is not None else 502
+        app.logger.error(
+            "Supabase update failed: note_id=%s status=%s response=%s",
+            nid, status, getattr(error.response, "text", str(error))
+        )
+        return jsonify({"error": "Supabase update failed", "status": status}), 502
 
 def _delete_note(nid):
     if not SUPABASE_URL or not SUPABASE_KEY:
