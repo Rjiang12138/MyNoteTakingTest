@@ -200,6 +200,89 @@
             transform: translateY(-1px);
         }
 
+        .btn-translate {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .btn-translate:hover {
+            background: #138496;
+            transform: translateY(-1px);
+        }
+
+        .btn-replace {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .btn-replace:hover {
+            background: #e0a800;
+            transform: translateY(-1px);
+        }
+
+        .translate-panel {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f0f8ff;
+            border: 1px solid #b8daff;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .translate-panel.show {
+            display: block;
+        }
+
+        .translate-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .translate-result {
+            padding: 12px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            min-height: 60px;
+            white-space: pre-wrap;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .translate-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .lang-select {
+            padding: 6px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 13px;
+            background: white;
+        }
+
+        .translate-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #17a2b8;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         .form-group {
             margin-bottom: 20px;
         }
@@ -345,6 +428,7 @@
                     <h2 class="editor-title" id="editorTitle">Select a note to edit</h2>
                     <div class="editor-actions" id="editorActions" style="display: none;">
                         <button class="btn btn-save" id="saveBtn">💾 Save</button>
+                        <button class="btn btn-translate" id="translateBtn">🌐 Translate</button>
                         <button class="btn btn-delete" id="deleteBtn">🗑️ Delete</button>
                     </div>
                 </div>
@@ -360,6 +444,28 @@
                     <div class="form-group">
                         <label class="form-label" for="noteContent">Content</label>
                         <textarea class="form-textarea" id="noteContent" placeholder="Start writing your note..."></textarea>
+                    </div>
+
+                    <div class="translate-panel" id="translatePanel">
+                        <div class="translate-header">
+                            <strong>🌐 Translation</strong>
+                            <div class="translate-controls">
+                                <select class="lang-select" id="langSelect">
+                                    <option value="zh">中文</option>
+                                    <option value="en" selected>English</option>
+                                    <option value="ja">日本語</option>
+                                    <option value="ko">한국어</option>
+                                    <option value="fr">Français</option>
+                                    <option value="de">Deutsch</option>
+                                    <option value="es">Español</option>
+                                </select>
+                                <button class="btn btn-translate" id="doTranslateBtn">Translate</button>
+                                <button class="btn btn-replace" id="replaceBtn" title="Replace original text with translation">Replace</button>
+                            </div>
+                        </div>
+                        <div class="translate-result" id="translateResult">
+                            Click "Translate" to see translation here.
+                        </div>
                     </div>
                 </div>
 
@@ -377,6 +483,7 @@
                 this.notes = [];
                 this.currentNote = null;
                 this.isLoading = false;
+                this.translatedText = '';
                 this.init();
             }
 
@@ -390,6 +497,11 @@
                 document.getElementById('saveBtn').addEventListener('click', () => this.saveNote());
                 document.getElementById('deleteBtn').addEventListener('click', () => this.deleteNote());
                 document.getElementById('searchBox').addEventListener('input', (e) => this.searchNotes(e.target.value));
+                
+                // Translate
+                document.getElementById('translateBtn').addEventListener('click', () => this.toggleTranslatePanel());
+                document.getElementById('doTranslateBtn').addEventListener('click', () => this.doTranslate());
+                document.getElementById('replaceBtn').addEventListener('click', () => this.replaceWithTranslation());
                 
                 // Auto-save on content change (debounced)
                 let saveTimeout;
@@ -593,6 +705,59 @@
                         <div class="note-date">${this.formatDate(note.updated_at)}</div>
                     </div>
                 `).join('');
+            }
+
+            // ---- Translation ----
+
+            toggleTranslatePanel() {
+                const panel = document.getElementById('translatePanel');
+                panel.classList.toggle('show');
+                // Reset translation when toggling off
+                if (!panel.classList.contains('show')) {
+                    this.translatedText = '';
+                    document.getElementById('translateResult').textContent = 'Click "Translate" to see translation here.';
+                }
+            }
+
+            async doTranslate() {
+                const content = document.getElementById('noteContent').value.trim();
+                if (!content) {
+                    this.showMessage('Please enter some text to translate', 'error');
+                    return;
+                }
+
+                const targetLang = document.getElementById('langSelect').value;
+                const resultEl = document.getElementById('translateResult');
+
+                resultEl.innerHTML = '<span class="translate-spinner"></span> Translating...';
+
+                try {
+                    const response = await fetch('/api/translate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: content, target_lang: targetLang }),
+                    });
+
+                    const data = await response.json();
+                    if (!response.ok) {
+                        resultEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+                        return;
+                    }
+
+                    this.translatedText = data.translated_text;
+                    resultEl.textContent = data.translated_text;
+                } catch (error) {
+                    resultEl.textContent = 'Translation failed: ' + error.message;
+                }
+            }
+
+            replaceWithTranslation() {
+                if (!this.translatedText) {
+                    this.showMessage('No translation available. Please translate first.', 'error');
+                    return;
+                }
+                document.getElementById('noteContent').value = this.translatedText;
+                this.showMessage('Content replaced with translation!', 'success');
             }
 
             showMessage(message, type) {

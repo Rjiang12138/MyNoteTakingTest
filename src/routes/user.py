@@ -1,39 +1,39 @@
 from flask import Blueprint, jsonify, request
-from src.models.user import User, db
+from src.store import get_all_users, get_user, create_user, update_user, delete_user
 
 user_bp = Blueprint('user', __name__)
 
+
 @user_bp.route('/users', methods=['GET'])
-def get_users():
-    users = User.query.all()
-    return jsonify([user.to_dict() for user in users])
+def list_users():
+    return jsonify(get_all_users())
+
 
 @user_bp.route('/users', methods=['POST'])
-def create_user():
-    
+def create_new_user():
     data = request.json
-    user = User(username=data['username'], email=data['email'])
-    db.session.add(user)
-    db.session.commit()
-    return jsonify(user.to_dict()), 201
+    user = create_user(data['username'], data['email'])
+    return jsonify(user), 201
+
 
 @user_bp.route('/users/<int:user_id>', methods=['GET'])
-def get_user(user_id):
-    user = User.query.get_or_404(user_id)
-    return jsonify(user.to_dict())
+def get_single_user(user_id):
+    user = get_user(user_id)
+    if user is None:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(user)
+
 
 @user_bp.route('/users/<int:user_id>', methods=['PUT'])
-def update_user(user_id):
-    user = User.query.get_or_404(user_id)
-    data = request.json
-    user.username = data.get('username', user.username)
-    user.email = data.get('email', user.email)
-    db.session.commit()
-    return jsonify(user.to_dict())
+def update_existing_user(user_id):
+    user = update_user(user_id, **request.json)
+    if user is None:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(user)
+
 
 @user_bp.route('/users/<int:user_id>', methods=['DELETE'])
-def delete_user(user_id):
-    user = User.query.get_or_404(user_id)
-    db.session.delete(user)
-    db.session.commit()
-    return '', 204
+def delete_existing_user(user_id):
+    if delete_user(user_id):
+        return '', 204
+    return jsonify({'error': 'User not found'}), 404
