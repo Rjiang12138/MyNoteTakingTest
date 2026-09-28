@@ -71,7 +71,7 @@ def translate_text():
                 'temperature': 0.3,
                 'max_tokens': 4096,
             },
-            timeout=30,
+            timeout=10,
         )
         response.raise_for_status()
         result = response.json()
