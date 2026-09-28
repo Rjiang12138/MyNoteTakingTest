@@ -10,7 +10,7 @@ try:
 except ImportError:
     pass
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request, jsonify
 from flask_cors import CORS
 from src.routes.user import user_bp
 from src.routes.note import note_bp
@@ -26,6 +26,17 @@ CORS(app)
 app.register_blueprint(user_bp, url_prefix='/api')
 app.register_blueprint(note_bp, url_prefix='/api')
 app.register_blueprint(translate_bp, url_prefix='/api')
+
+
+@app.route('/api/debug')
+def debug():
+    """Debug: show what Flask sees."""
+    return jsonify({
+        'path': request.path,
+        'url': request.url,
+        'script_root': request.script_root,
+        'blueprints': [str(bp) for bp in app.blueprints],
+    })
 
 
 @app.route('/', defaults={'path': ''})
