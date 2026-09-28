@@ -19,6 +19,14 @@ STATIC = os.path.join(os.path.dirname(__file__), "..", "src", "static")
 app = Flask(__name__)
 CORS(app)
 
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Keep API failures JSON so the frontend never parses an HTML error page."""
+    app.logger.exception("Unhandled request error")
+    return jsonify({"error": "Internal server error"}), 500
+
+
 def _su():
     return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}", "Content-Type": "application/json"}
 
@@ -28,8 +36,13 @@ def _su():
 @app.route("/", defaults={"rest": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 @app.route("/<path:rest>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 def handler(rest):
-    # Normalize: Vercel strips /api/ prefix, Flask sees /xxx instead of /api/xxx
-    path = "/" + rest if rest else "/"
+    # Depending on the Vercel Python runtime/configuration, the function can
+    # receive either /notes or /api/notes. Normalize both forms.
+    path = "/" + rest.lstrip("/") if rest else "/"
+    if path == "/api":
+        path = "/"
+    elif path.startswith("/api/"):
+        path = path[4:]
     
     if request.method == "OPTIONS":
         return "", 200
@@ -40,7 +53,7 @@ def handler(rest):
             return send_from_directory(STATIC, rest)
     
     # --- API: notes ---
-    m = re.match(r"^notes/(\d+)$", path)
+    m = re.match(r"^/?notes/(\d+)$", path)
     if path == "notes" or path == "/notes":
         if request.method == "GET":
             return _list_notes()
@@ -93,12 +106,16 @@ def handler(rest):
 # ============ handler functions ============
 
 def _list_notes():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
                      params={"order": "updated_at.desc"}, timeout=10)
     r.raise_for_status()
     return jsonify(r.json())
 
 def _create_note():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     d = request.get_json(silent=True) or {}
     if not d.get("title") or not d.get("content"):
         return jsonify({"error": "Title and content are required"}), 400
@@ -109,6 +126,8 @@ def _create_note():
     return jsonify(r.json()[0]), 201
 
 def _get_note(nid):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
                      params={"id": f"eq.{nid}"}, timeout=10)
     r.raise_for_status()
@@ -116,6 +135,8 @@ def _get_note(nid):
     return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
 def _update_note(nid):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     d = request.get_json(silent=True) or {}
     body = {"updated_at": datetime.now(timezone.utc).isoformat()}
     if "title" in d: body["title"] = d["title"]
@@ -127,11 +148,15 @@ def _update_note(nid):
     return (jsonify(rows[0]), 200) if rows else (jsonify({"error": "Not found"}), 404)
 
 def _delete_note(nid):
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     r = requests.delete(f"{SUPABASE_URL}/rest/v1/notes?id=eq.{nid}", headers=_su(), timeout=10)
     r.raise_for_status()
     return "", 204
 
 def _search_notes():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
     q = (request.args.get("q") or "").strip()
     if not q: return jsonify([])
     r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),

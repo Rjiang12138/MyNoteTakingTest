@@ -524,9 +524,12 @@
                 
                 try {
                     const response = await fetch('/api/notes');
-                    if (!response.ok) throw new Error('Failed to load notes');
-                    
-                    this.notes = await response.json();
+                    const data = await this.readJsonResponse(response);
+                    if (!response.ok) {
+                        throw new Error(data.error || `Request failed (${response.status})`);
+                    }
+
+                    this.notes = data;
                     this.renderNotesList();
                     this.hideMessage();
                 } catch (error) {
@@ -638,9 +641,12 @@
                         });
                     }
 
-                    if (!response.ok) throw new Error('Failed to save note');
+                    const data = await this.readJsonResponse(response);
+                    if (!response.ok) {
+                        throw new Error(data.error || `Request failed (${response.status})`);
+                    }
 
-                    const savedNote = await response.json();
+                    const savedNote = data;
                     this.currentNote = savedNote;
                     
                     // Update notes list
@@ -672,7 +678,10 @@
                         method: 'DELETE'
                     });
 
-                    if (!response.ok) throw new Error('Failed to delete note');
+                    const data = await this.readJsonResponse(response);
+                    if (!response.ok) {
+                        throw new Error(data.error || `Request failed (${response.status})`);
+                    }
 
                     // Remove from notes array
                     this.notes = this.notes.filter(n => n.id !== this.currentNote.id);
@@ -738,7 +747,7 @@
                         body: JSON.stringify({ text: content, target_lang: targetLang }),
                     });
 
-                    const data = await response.json();
+                    const data = await this.readJsonResponse(response);
                     if (!response.ok) {
                         resultEl.textContent = 'Error: ' + (data.error || 'Unknown error');
                         return;
@@ -771,6 +780,21 @@
 
             hideMessage() {
                 document.getElementById('messageArea').innerHTML = '';
+            }
+
+            async readJsonResponse(response) {
+                if (response.status === 204) {
+                    return {};
+                }
+                const contentType = response.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    const body = await response.text();
+                    throw new Error(
+                        `Server returned ${contentType || 'non-JSON'} (${response.status}). ` +
+                        'Check the Vercel API route and deployment environment variables.'
+                    );
+                }
+                return response.json();
             }
 
             escapeHtml(text) {
