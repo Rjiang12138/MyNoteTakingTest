@@ -108,9 +108,12 @@ def handler(rest):
 def _list_notes():
     if not SUPABASE_URL or not SUPABASE_KEY:
         return jsonify({"error": "SUPABASE_URL and SUPABASE_KEY are not configured"}), 503
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
-                     params={"order": "updated_at.desc"}, timeout=10)
-    r.raise_for_status()
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/notes", headers=_su(),
+                         params={"order": "updated_at.desc"}, timeout=10)
+        r.raise_for_status()
+    except requests.exceptions.RequestException as error:
+        return jsonify({"error": "Supabase request failed", "details": str(error)}), 502
     return jsonify(r.json())
 
 def _create_note():

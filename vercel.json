@@ -12,12 +12,8 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/favicon.ico",
-      "dest": "/src/static/favicon.ico"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/src/static/index.html"
+      "dest": "/api/index.py"
     }
   ]
 }
